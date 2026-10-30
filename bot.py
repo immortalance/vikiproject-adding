@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""vikiproject adding - Vikiproje ekleme botu (GitHub Actions icin).
+"""vikiproject adding - Immortalance'in Vikipedi botu (GitHub Actions icin).
 
-Ana madde, sablon ve kategori tartisma sayfalarina, Ingilizce Vikipedi'deki
-karsiliklarinin vikiproje sablonlarina gore {{Vikiproje}} ekler.
+Gorevler (GOREV ortam degiskeni):
+  vikiproje     Madde, sablon ve kategori tartisma sayfalarina, Ingilizce Vikipedi'deki
+                karsiliklarinin vikiproje sablonlarina gore {{Vikiproje}} ekler.
+  diller-arasi  Maddelerdeki [[:dil:Baslik|Metin]] baglantilarini Turkce karsiligi varsa
+                yerel baglantiya, yoksa {{diller arasi baglanti}} sablonuna cevirir.
 
 Ortam degiskenleri:
   BOT_USER, BOT_PASS   Ozel:BotSifreleri ile alinan kullanici adi ve sifre (zorunlu, kuru calismada degil)
-  KAYNAK               yeni | kategori | liste | sayfa   (varsayilan: yeni)
-  DEGER                kaynaga gore: saat sayisi / kategori adi / dosya yolu / sayfa basliklari (| ile)
+  GOREV                vikiproje | diller-arasi   (varsayilan: vikiproje)
+  KAYNAK               yeni | kategori | arama | liste | sayfa   (varsayilan: yeni)
+  DEGER                kaynaga gore: saat sayisi / kategori adi / arama ifadesi / dosya yolu / sayfa basliklari (| ile)
   KURU_CALISMA         1 ise kaydetmez, yalnizca farklari gosterir
   MAKS_DUZENLEME       bir calismadaki en fazla kayit (varsayilan 100)
   DUZENLEME_ARALIGI    iki kayit arasindaki saniye (varsayilan 10)
@@ -21,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+import diller_arasi
 import vikiproje
 
 TR = "https://tr.wikipedia.org/w/api.php"
@@ -116,6 +121,7 @@ class _Temporary(Exception):
 
 
 # ------------------------------------------------------------ sayfa kaynaklari
+# Kaynaklar ham sayfa nesneleri ({ns, title}) uretir; goreve gore basliga cevrilir.
 
 def talk_titles_from_pages(pages):
     """API sayfa nesnelerinden (ns, title) islenecek tartisma basliklarini uretir."""
@@ -128,55 +134,94 @@ def talk_titles_from_pages(pages):
             yield NAMESPACES[ns][0] + rest
 
 
-def source_new(tr, hours):
-    """Son N saatte olusturulan madde, sablon ve kategorilerin tartisma sayfalari."""
-    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    params = dict(list="recentchanges", rctype="new", rcnamespace="0|10|14", rcshow="!redirect",
-                  rcprop="title", rclimit="500", rcdir="newer", rcstart=since)
+def article_titles_from_pages(pages):
+    """Madde basliklarini uretir; madde tartisma sayfasi verilirse maddeye cevirir."""
+    for p in pages:
+        if p["ns"] == 0:
+            yield p["title"]
+        elif p["ns"] == 1:
+            yield p["title"].split(":", 1)[1]
+
+
+def _paged(tr, key, params):
     while True:
         d = tr.query(**params)
-        yield from talk_titles_from_pages(d["query"]["recentchanges"])
+        yield from d["query"][key]
         if "continue" not in d:
             break
         params.update(d["continue"])
 
 
-def source_category(tr, category):
+def source_new(tr, hours, namespaces):
+    """Son N saatte olusturulan sayfalar."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _paged(tr, "recentchanges", dict(list="recentchanges", rctype="new", rcnamespace=namespaces,
+                                             rcshow="!redirect", rcprop="title", rclimit="500",
+                                             rcdir="newer", rcstart=since))
+
+
+def source_category(tr, category, namespaces):
     if not category.lower().startswith("kategori:"):
         category = "Kategori:" + category
-    params = dict(list="categorymembers", cmtitle=category, cmnamespace="0|1|10|11|14|15",
-                  cmprop="title", cmlimit="500")
-    while True:
-        d = tr.query(**params)
-        yield from talk_titles_from_pages(d["query"]["categorymembers"])
-        if "continue" not in d:
-            break
-        params.update(d["continue"])
+    return _paged(tr, "categorymembers", dict(list="categorymembers", cmtitle=category,
+                                               cmnamespace=namespaces, cmprop="title", cmlimit="500"))
+
+
+def source_search(tr, query):
+    """CirrusSearch aramasi (insource: ifadeleri dahil), yalnizca maddeler."""
+    return _paged(tr, "search", dict(list="search", srsearch=query, srnamespace="0",
+                                      srprop="", srlimit="500", srwhat="text"))
 
 
 def source_titles(tr, titles):
-    """Baslik listesini API ile normallestirip tartisma sayfasina cevirir."""
+    """Baslik listesini API ile normallestirir."""
     titles = [t.strip() for t in titles if t.strip() and not t.strip().startswith("#")]
     for i in range(0, len(titles), 50):
         d = tr.query(titles="|".join(titles[i:i + 50]))
-        yield from talk_titles_from_pages(d["query"]["pages"])
+        yield from d["query"]["pages"]
 
 
-# ------------------------------------------------------------ tek sayfa
+# ------------------------------------------------------------ ortak
 
-def handle(tr, en, talk_title, opts):
-    """(durum, mesaj) dondurur. durum: kaydedildi | degisiklik-yok | atlandi | hata."""
-    d = tr.query(titles=talk_title, prop="revisions|info", rvprop="content|timestamp",
+def load_page(tr, title):
+    d = tr.query(titles=title, prop="revisions|info", rvprop="content|timestamp",
                  rvslots="main", curtimestamp="1")
     page = d["query"]["pages"][0]
+    missing = bool(page.get("missing"))
+    text = "" if missing or not page.get("revisions") else page["revisions"][0]["slots"]["main"]["content"]
+    base_ts = None if missing or not page.get("revisions") else page["revisions"][0]["timestamp"]
+    return page, text, base_ts, d.get("curtimestamp")
+
+
+def save(tr, page, old, new, summary, base_ts, start_ts, opts):
+    if opts["dry"]:
+        diff = "\n".join(difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=1))
+        return "kaydedildi", "(kuru) " + summary + "\n" + diff
+    missing = bool(page.get("missing"))
+    params = {"action": "edit", "title": page["title"], "text": new, "summary": summary,
+              "token": tr.csrf, "starttimestamp": start_ts, "assert": "user",
+              "nocreate" if not missing else "createonly": "1"}
+    if base_ts:
+        params["basetimestamp"] = base_ts
+    if tr.is_bot:
+        params["bot"] = "1"
+    r = tr.call(params, post=True)
+    if r.get("edit", {}).get("result") != "Success":
+        raise RuntimeError("Kayit basarisiz: %s" % r.get("edit"))
+    return "kaydedildi", summary
+
+
+# ------------------------------------------------------------ gorev: vikiproje
+
+def handle_vikiproje(tr, ctx, talk_title, opts):
+    """(durum, mesaj) dondurur. durum: kaydedildi | degisiklik-yok | atlandi | hata."""
+    en = ctx["en"]
+    page, text, base_ts, start_ts = load_page(tr, talk_title)
     ns = page["ns"]
     if ns not in TALK_NS or page.get("invalid"):
         return "atlandi", "desteklenmeyen ad alani"
-    missing = bool(page.get("missing"))
-    if missing and not opts["create"]:
+    if page.get("missing") and not opts["create"]:
         return "atlandi", "tartisma sayfasi yok"
-    text = "" if missing else page["revisions"][0]["slots"]["main"]["content"]
-    base_ts = None if missing else page["revisions"][0]["timestamp"]
     if page.get("redirect") or vikiproje.is_redirect(text):
         return "atlandi", "yonlendirme"
 
@@ -201,39 +246,118 @@ def handle(tr, en, talk_title, opts):
     new, summary = vikiproje.process(text, source, en_talk)
     if not summary:
         return "degisiklik-yok", ""
+    return save(tr, page, text, new, summary, base_ts, start_ts, opts)
 
-    if opts["dry"]:
-        diff = "\n".join(difflib.unified_diff(text.splitlines(), new.splitlines(), lineterm="", n=1))
-        return "kaydedildi", "(kuru) " + summary + "\n" + diff
 
-    params = {"action": "edit", "title": page["title"], "text": new, "summary": summary,
-              "token": tr.csrf, "starttimestamp": d.get("curtimestamp"), "assert": "user",
-              "nocreate" if not missing else "createonly": "1"}
-    if base_ts:
-        params["basetimestamp"] = base_ts
-    if tr.is_bot:
-        params["bot"] = "1"
-    r = tr.call(params, post=True)
-    if r.get("edit", {}).get("result") != "Success":
-        raise RuntimeError("Kayit basarisiz: %s" % r.get("edit"))
-    return "kaydedildi", summary
+# ------------------------------------------------------------ gorev: diller arasi
+
+def language_map(tr):
+    """Gecerli Vikipedi dil kodlari -> API adresi (tr.wikipedia interwiki tablosundan)."""
+    d = tr.query(meta="siteinfo", siprop="interwikimap", sifilteriw="local")
+    out = {}
+    for iw in d["query"]["interwikimap"]:
+        if iw.get("language") and iw["url"].endswith("/wiki/$1"):
+            out[iw["prefix"].lower()] = iw["url"][:-len("/wiki/$1")] + "/w/api.php"
+    if "en" not in out or "tr" not in out:
+        raise SystemExit("Dil tablosu alinamadi.")
+    return out
+
+
+def lookup_turkish(api, titles, own_wiki):
+    """{baslik: {"skip":bool, "tr":str|None}} dondurur. Hata olursa istisna firlatir (sayfa atlanir).
+
+    own_wiki=True: tr.wikipedia'nin kendisi; yonlendirme izlenmez, yalnizca ad alani dogrulanir.
+    """
+    result = {}
+    titles = sorted(set(titles))
+    for i in range(0, len(titles), 50):
+        batch = titles[i:i + 50]
+        params = dict(titles="|".join(batch))
+        if not own_wiki:
+            params.update(prop="langlinks", lllang="tr", lllimit="max", redirects="1")
+        q = api.query(**params)["query"]
+        norm = {n["from"]: n["to"] for n in q.get("normalized", [])}
+        redir = {r["from"]: r["to"] for r in q.get("redirects", [])}
+        interwiki = {iw["title"] for iw in q.get("interwiki", [])}
+        pages = {p["title"]: p for p in q.get("pages", [])}
+        for t in batch:
+            if t in interwiki or norm.get(t) in interwiki:
+                result[t] = {"skip": True}
+                continue
+            final = norm.get(t, t)
+            final = redir.get(final, final)
+            p = pages.get(final)
+            if p is None or p.get("invalid") or p.get("ns") != 0:
+                result[t] = {"skip": True}  # kardes proje, baska ad alani ya da gecersiz baslik
+                continue
+            if own_wiki:
+                result[t] = {"tr": t}  # [[:tr:X]] -> [[X]] (ad alani 0 dogrulandi)
+                continue
+            ll = [l["title"] for l in p.get("langlinks", []) if l.get("lang") == "tr"]
+            result[t] = {"tr": ll[0] if ll else None}
+    return result
+
+
+def handle_interlang(tr, ctx, title, opts):
+    page, text, base_ts, start_ts = load_page(tr, title)
+    if page.get("missing") or page.get("invalid") or page["ns"] != 0:
+        return "atlandi", "madde degil ya da yok"
+    if page.get("redirect") or vikiproje.is_redirect(text):
+        return "atlandi", "yonlendirme"
+    links = diller_arasi.find_links(text, ctx["langs"])
+    if not links:
+        return "degisiklik-yok", ""
+    infos = {}
+    by_lang = {}
+    for l in links:
+        by_lang.setdefault(l.lang, set()).add(l.title)
+    for lang, titles in by_lang.items():
+        if lang == "tr":
+            api, own = tr, True
+        else:
+            url = ctx["langs"][lang]
+            api = ctx["apis"].get(url)
+            if api is None:
+                api = ctx["apis"][url] = Api(url)
+            own = False
+        # Bir dilde hata olursa istisna yukari cikar ve sayfa hic degistirilmez.
+        for t, info in lookup_turkish(api, titles, own).items():
+            infos[(lang, t)] = info
+    new, local, tmpl = diller_arasi.apply(text, links, infos)
+    if new == text:
+        return "degisiklik-yok", ""
+    return save(tr, page, text, new, diller_arasi.summary(local, tmpl), base_ts, start_ts, opts)
 
 
 # ------------------------------------------------------------ ana akis
 
+GOREVLER = {
+    # gorev: (isleyici, baslik cevirici, yeni/kategori ad alanlari, varsayilan arama)
+    "vikiproje": (handle_vikiproje, talk_titles_from_pages, "0|1|10|11|14|15", None),
+    "diller-arasi": (handle_interlang, article_titles_from_pages, "0|1",
+                     r"insource:/\[\[ *:[a-z-]+ *:[^\]]/"),
+}
+
+
 def main():
+    gorev = env("GOREV", "vikiproje").lower()
+    if gorev not in GOREVLER:
+        raise SystemExit("Bilinmeyen GOREV: " + gorev)
+    handler, to_titles, namespaces, default_search = GOREVLER[gorev]
     kaynak = env("KAYNAK", "yeni").lower()
     deger = env("DEGER")
     opts = {
         "dry": env("KURU_CALISMA", "0") in ("1", "true", "evet"),
-        "create": env("SAYFA_OLUSTUR", "1") in ("1", "true", "evet"),
+        "create": env("SAYFA_OLUSTUR", "1") in ("1", "true", "evet") and gorev == "vikiproje",
     }
     max_edits = int(env("MAKS_DUZENLEME", "100"))
     delay = float(env("DUZENLEME_ARALIGI", "10"))
 
-    vikiproje.load_rules()
-    tr, en = Api(TR), Api(EN)
+    tr = Api(TR)
     tr.is_bot = False
+    ctx = {"en": Api(EN), "apis": {}}
+    if gorev == "vikiproje":
+        vikiproje.load_rules()
     if not opts["dry"]:
         user, pw = env("BOT_USER"), env("BOT_PASS")
         if not user or not pw:
@@ -241,22 +365,32 @@ def main():
         tr.login(user, pw)
         if not tr.is_bot:
             delay = max(delay, 15)
+    if gorev == "diller-arasi":
+        ctx["langs"] = language_map(tr)
+        ctx["apis"][ctx["langs"]["en"]] = ctx["en"]
 
     if kaynak == "yeni":
-        titles = source_new(tr, float(deger or 25))
+        pages = source_new(tr, float(deger or 25), "0" if gorev == "diller-arasi" else "0|10|14")
     elif kaynak == "kategori":
         if not deger:
             raise SystemExit("kategori kaynagi icin DEGER gerekli")
-        titles = source_category(tr, deger)
+        pages = source_category(tr, deger, namespaces)
+    elif kaynak == "arama":
+        query = deger or default_search
+        if not query:
+            raise SystemExit("arama kaynagi icin DEGER (arama ifadesi) gerekli")
+        pages = source_search(tr, query)
     elif kaynak == "liste":
         with open(deger or "sayfalar.txt", encoding="utf-8") as f:
-            titles = source_titles(tr, f.read().splitlines())
+            pages = source_titles(tr, f.read().splitlines())
     elif kaynak == "sayfa":
-        titles = source_titles(tr, deger.split("|"))
+        pages = source_titles(tr, deger.split("|"))
     else:
         raise SystemExit("Bilinmeyen KAYNAK: " + kaynak)
+    titles = to_titles(pages)
 
-    print("Kaynak: %s %s | kuru calisma: %s | en fazla %d kayit" % (kaynak, deger, opts["dry"], max_edits))
+    print("Gorev: %s | Kaynak: %s %s | kuru calisma: %s | en fazla %d kayit"
+          % (gorev, kaynak, deger, opts["dry"], max_edits))
     counts = {"kaydedildi": 0, "degisiklik-yok": 0, "atlandi": 0, "hata": 0}
     errors, seen = [], set()
     for title in titles:
@@ -267,7 +401,7 @@ def main():
             print("Kayit siniri doldu (%d)." % max_edits)
             break
         try:
-            status, msg = handle(tr, en, title, opts)
+            status, msg = handler(tr, ctx, title, opts)
         except vikiproje.VPError as ex:
             status, msg = "hata", str(ex)
         except Exception as ex:  # tek sayfa hatasi botu durdurmasin
@@ -285,7 +419,7 @@ def main():
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_file:
         with open(summary_file, "a", encoding="utf-8") as f:
-            f.write("## vikiproject adding\n\n%s\n\n" % line)
+            f.write("## %s\n\n%s\n\n" % (gorev, line))
             if errors:
                 f.write("### Hatalar (sayfalar degistirilmedi)\n\n")
                 for t, m in errors:

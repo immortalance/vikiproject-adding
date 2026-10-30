@@ -50,3 +50,16 @@ Her çalıştırmanın özeti ve hatalı sayfalar, Actions çalıştırma sayfas
 ```
 
 Koşul sütunu boş bırakılabilir. Önem sütununa `-` yazılırsa önem derecesi aktarılmaz.
+
+## Görev 2: Diller arası bağlantılar (`diller-arasi`)
+
+Maddelerdeki `[[:en:Sayfa|Metin]]` biçimindeki bağlantıları dönüştürür:
+
+- Kaynak dildeki sayfanın **Türkçe karşılığı varsa** (dil bağlantılarından bulunur, yönlendirmeler izlenir) yerel bağlantıya çevirir: `[[Türkçe başlık|Metin]]`.
+- Karşılığı **yoksa** `{{diller arası bağlantı|Başlık|dil}}` ya da görünen metin farklıysa `{{diller arası bağlantı|Metin|dil|Başlık}}` yapar.
+- `[[:tr:X]]` bağlantıları `[[X]]` olur.
+- Kardeş projelere (`[[:en:s:...]]` gibi), başka ad alanlarına (kategori, dosya…), bölüm bağlantılarına (`#`) ve yorum/nowiki içindekilere dokunmaz.
+- Dil kodları Türkçe Vikipedi'nin dil tablosundan alınır (`simple`, `zh-yue`, `be-tarask` dahil).
+- Herhangi bir API sorgusu hata verirse sayfa hiç değiştirilmez ve rapora yazılır.
+
+İş akışı: **Actions → diller arasi baglanti → Run workflow**. Varsayılan kaynak `arama`dır (tüm `[[:dil:...]]` bağlantısı içeren maddeleri bulur). Zamanlama, bot onayı alınana kadar kapalıdır; açmak için `.github/workflows/diller-arasi.yml` içindeki `schedule` satırlarının başındaki `#` işaretlerini kaldırın.
