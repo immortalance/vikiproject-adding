@@ -1,0 +1,6 @@
+# "liste" kaynagi icin: her satira bir baslik. Madde, sablon, kategori veya
+# dogrudan tartisma sayfasi yazabilirsiniz; # ile baslayan satirlar atlanir.
+# Ornek:
+# Mustafa Kemal Atatürk
+# Şablon:Bilgi kutusu ülke
+# Kategori:Türk matematikçiler
