@@ -1,0 +1,52 @@
+name: vikiproject adding
+
+on:
+  schedule:
+    - cron: "37 1 * * *"   # her gun 04:37 (Turkiye saati); son 25 saatte acilan sayfalar
+  workflow_dispatch:
+    inputs:
+      kaynak:
+        description: "Sayfa kaynagi"
+        type: choice
+        options: [yeni, kategori, liste, sayfa]
+        default: yeni
+      deger:
+        description: "yeni: saat | kategori: kategori adi | liste: dosya (sayfalar.txt) | sayfa: Baslik1|Baslik2"
+        required: false
+        default: ""
+      kuru_calisma:
+        description: "Kuru calisma (kaydetmeden farklari goster)"
+        type: boolean
+        default: true
+      maks_duzenleme:
+        description: "En fazla kayit"
+        default: "100"
+
+concurrency:
+  group: vikiproject-adding
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  calistir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Testler
+        run: python -m unittest test_vikiproje
+      - name: Bot
+        env:
+          BOT_USER: ${{ secrets.BOT_USER }}
+          BOT_PASS: ${{ secrets.BOT_PASS }}
+          KAYNAK: ${{ inputs.kaynak || 'yeni' }}
+          DEGER: ${{ inputs.deger }}
+          KURU_CALISMA: ${{ github.event_name == 'workflow_dispatch' && inputs.kuru_calisma && '1' || '0' }}
+          MAKS_DUZENLEME: ${{ inputs.maks_duzenleme || '100' }}
+        run: python bot.py
