@@ -1,0 +1,56 @@
+name: diller arasi baglanti
+
+on:
+  # Bot onayi alininca asagidaki iki satirin basindaki # isaretlerini kaldirin
+  # (her gun 05:13 Turkiye saati; arama ile bulunan maddeler, gunde en fazla 100 kayit):
+  # schedule:
+  #   - cron: "13 2 * * *"
+  workflow_dispatch:
+    inputs:
+      kaynak:
+        description: "Sayfa kaynagi"
+        type: choice
+        options: [arama, yeni, kategori, liste, sayfa]
+        default: arama
+      deger:
+        description: "arama: insource ifadesi (bos = tum [[:dil:...]] baglantilari) | yeni: saat | kategori: ad | liste: dosya | sayfa: Baslik1|Baslik2"
+        required: false
+        default: ""
+      kuru_calisma:
+        description: "Kuru calisma (kaydetmeden farklari goster)"
+        type: boolean
+        default: true
+      maks_duzenleme:
+        description: "En fazla kayit"
+        default: "100"
+
+concurrency:
+  group: immobot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  calistir:
+    runs-on: ubuntu-latest
+    environment: vikipedi
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Testler
+        run: python -m unittest discover -p "test_*.py"
+      - name: Bot
+        env:
+          GOREV: diller-arasi
+          BOT_USER: ${{ secrets.BOT_USER }}
+          BOT_PASS: ${{ secrets.BOT_SIFRE }}
+          KAYNAK: ${{ inputs.kaynak || 'arama' }}
+          DEGER: ${{ inputs.deger }}
+          KURU_CALISMA: ${{ github.event_name == 'workflow_dispatch' && inputs.kuru_calisma && '1' || '0' }}
+          MAKS_DUZENLEME: ${{ inputs.maks_duzenleme || '100' }}
+        run: python bot.py

@@ -23,7 +23,7 @@ on:
         default: "100"
 
 concurrency:
-  group: vikiproject-adding
+  group: immobot
   cancel-in-progress: false
 
 permissions:
@@ -41,9 +41,10 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - name: Testler
-        run: python -m unittest test_vikiproje
+        run: python -m unittest discover -p "test_*.py"
       - name: Bot
         env:
+          GOREV: vikiproje
           BOT_USER: ${{ secrets.BOT_USER }}
           BOT_PASS: ${{ secrets.BOT_SIFRE }}
           KAYNAK: ${{ inputs.kaynak || 'yeni' }}
