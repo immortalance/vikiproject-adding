@@ -70,8 +70,12 @@ class Donusturme(unittest.TestCase):
         self.assertIn("[[:en:Category:Rivers of Germany|nehirler]]", n)
         self.assertIn("<!-- [[:en:Gizli yorum]] -->", n)
         self.assertIn("{{diller arası bağlantı|Basit sayfa|simple}}", n)
-        self.assertIn("{{diller arası bağlantı|Eşittir|en|3=A=B}}", n)
+        self.assertIn("{{diller arası bağlantı|1=A=B|en|lt=Eşittir}}", n)
         self.assertIn("[[Kategori:Tarih]]", n)
+        # Gorunen metin baslik olarak kullanilmaz
+        new, _, _ = d.apply("[[:en:2025–26_EuroCup_Women|2025]]", d.find_links("[[:en:2025–26_EuroCup_Women|2025]]", LANGS),
+                            {("en", "2025–26 EuroCup Women"): {"tr": None}})
+        self.assertEqual(new, "{{diller arası bağlantı|2025–26 EuroCup Women|en|lt=2025}}")
         self.assertEqual((self.local, self.tmpl), (4, 6))
 
     def test_ozet(self):

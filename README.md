@@ -56,7 +56,7 @@ Koşul sütunu boş bırakılabilir. Önem sütununa `-` yazılırsa önem derec
 Maddelerdeki `[[:en:Sayfa|Metin]]` biçimindeki bağlantıları dönüştürür:
 
 - Kaynak dildeki sayfanın **Türkçe karşılığı varsa** (dil bağlantılarından bulunur, yönlendirmeler izlenir) yerel bağlantıya çevirir: `[[Türkçe başlık|Metin]]`.
-- Karşılığı **yoksa** `{{diller arası bağlantı|Başlık|dil}}` ya da görünen metin farklıysa `{{diller arası bağlantı|Metin|dil|Başlık}}` yapar.
+- Karşılığı **yoksa** `{{diller arası bağlantı|Başlık|dil}}` ya da görünen metin farklıysa `{{diller arası bağlantı|Başlık|dil|lt=Metin}}` yapar (görünen metin Türkçe başlık olarak kullanılmaz; böylece "2025", "Boyat," gibi hatalı kırmızı bağlantılar oluşmaz).
 - `[[:tr:X]]` bağlantıları `[[X]]` olur.
 - Kardeş projelere (`[[:en:s:...]]` gibi), başka ad alanlarına (kategori, dosya…), bölüm bağlantılarına (`#`) ve yorum/nowiki içindekilere dokunmaz.
 - Dil kodları Türkçe Vikipedi'nin dil tablosundan alınır (`simple`, `zh-yue`, `be-tarask` dahil).

@@ -60,10 +60,10 @@ def _param(value, index):
     return ("%d=%s" % (index, value)) if "=" in value else value
 
 
-def template(tr_title, lang, foreign=None):
-    args = [_param(tr_title, 1), _param(lang, 2)]
-    if foreign is not None:
-        args.append(_param(foreign, 3))
+def template(title, lang, lt=None):
+    args = [_param(title, 1), _param(lang, 2)]
+    if lt is not None:
+        args.append("lt=" + lt)
     return "{{" + SABLON + "|" + "|".join(args) + "}}"
 
 
@@ -92,8 +92,9 @@ def replacement(link, info):
         return None
     if not link.piped or link.display == link.title or link.display.lower() == link.lang:
         return template(link.title, link.lang)
-    # Gorunen metin Turkce baslik olarak kullanilir (AWB modulundeki davranis).
-    return template(link.display, link.lang, link.title)
+    # Gorunen metin Turkce baslik olarak KULLANILMAZ ("2025", "Boyat," gibi kirmizi baglanti
+    # uretmemek icin); lt= ile ayni metin gosterilir, baglanti kaynak basliga gider.
+    return template(link.title, link.lang, link.display)
 
 
 def apply(text, links, infos):
