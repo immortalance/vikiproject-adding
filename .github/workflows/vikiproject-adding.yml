@@ -32,6 +32,7 @@ permissions:
 jobs:
   calistir:
     runs-on: ubuntu-latest
+    environment: vikipedi
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +45,7 @@ jobs:
       - name: Bot
         env:
           BOT_USER: ${{ secrets.BOT_USER }}
-          BOT_PASS: ${{ secrets.BOT_PASS }}
+          BOT_PASS: ${{ secrets.BOT_SIFRE }}
           KAYNAK: ${{ inputs.kaynak || 'yeni' }}
           DEGER: ${{ inputs.deger }}
           KURU_CALISMA: ${{ github.event_name == 'workflow_dispatch' && inputs.kuru_calisma && '1' || '0' }}
