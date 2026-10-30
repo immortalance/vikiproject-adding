@@ -80,8 +80,8 @@ class Api:
                 err = data.get("error")
                 if err:
                     code = err.get("code", "")
-                    if code in ("maxlag", "ratelimited", "readonly", "internal_api_error_DBQueryTimeoutError"):
-                        raise _Temporary("API " + code, code == "ratelimited")
+                    if code in ("maxlag", "ratelimited", "readonly", "internal_api_error_DBQueryTimeoutError") or code.startswith("cirrussearch-"):
+                        raise _Temporary("API " + code, code == "ratelimited" or code.startswith("cirrussearch-"))
                     raise RuntimeError("%s: %s" % (code, err.get("info", "")))
                 return data
             except (_Temporary, requests.ConnectionError, requests.Timeout) as e:
